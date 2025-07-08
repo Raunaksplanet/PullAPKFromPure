@@ -3,13 +3,17 @@ from bs4 import BeautifulSoup
 import re
 from tqdm import tqdm
 
-def download_apk(package_name):
-    headers = {
-        "User-Agent": "Mozilla/5.0"
-    }
+# Speed optimization using adapter for connection reuse
+session = requests.Session()
+adapter = requests.adapters.HTTPAdapter(pool_connections=100, pool_maxsize=100)
+session.mount('https://', adapter)
+session.mount('http://', adapter)
+
+def download_apk(package_name, output_name=None):
+    headers = {"User-Agent": "Mozilla/5.0"}
 
     download_page = f"https://apkpure.net/{package_name.replace('.', '-')}/{package_name}/download"
-    resp = requests.get(download_page, headers=headers, timeout=10)
+    resp = session.get(download_page, headers=headers, timeout=5)
 
     if resp.status_code != 200 or "We couldn't find that page" in resp.text:
         print("[-] APK not available at apkpure.net")
@@ -22,7 +26,7 @@ def download_apk(package_name):
         return
 
     redirect_url = link["href"]
-    final = requests.get(redirect_url, headers=headers, allow_redirects=False, timeout=10)
+    final = session.get(redirect_url, headers=headers, allow_redirects=False, timeout=5)
     if final.status_code != 302 or "Location" not in final.headers:
         print("[-] Failed to get final APK link.")
         return
@@ -30,10 +34,9 @@ def download_apk(package_name):
     apk_url = final.headers["Location"]
     print(f"[+] Final APK URL: {apk_url}")
 
-    # Fast download using larger chunks
-    apk_response = requests.get(apk_url, headers=headers, stream=True, timeout=30)
+    apk_response = session.get(apk_url, headers=headers, stream=True, timeout=15)
     if apk_response.status_code == 200:
-        filename = f"{package_name}.apk"
+        filename = f"{output_name or package_name}.apk"
         total = int(apk_response.headers.get("Content-Length", 0))
         with open(filename, "wb") as f, tqdm(
             total=total,
@@ -41,14 +44,14 @@ def download_apk(package_name):
             unit_scale=True,
             unit_divisor=1024
         ) as bar:
-            for chunk in apk_response.iter_content(chunk_size=256 * 1024):  # 256 KB
+            for chunk in apk_response.iter_content(chunk_size = 2 * 1024 * 1024):  # 1MB chunks
                 if chunk:
                     f.write(chunk)
                     bar.update(len(chunk))
 
         print(f"[+] APK downloaded: {filename}")
 
-
 if __name__ == "__main__":
     pkg = input("Enter package name (e.g., com.zerodha.varsity): ").strip()
-    download_apk(pkg)
+    name = input("Enter output APK name (press Enter to use default): ").strip()
+    download_apk(pkg, output_name=name if name else None)
